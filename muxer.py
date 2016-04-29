@@ -1,5 +1,21 @@
 #!/usr/bin/python
 
+#-------------------------------------------------------------------------------
+# muxer.py
+#
+# written by Ingo Randolf 2016
+#
+#
+# This software is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# Version 3.
+#
+# This software is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#-------------------------------------------------------------------------------
+
 import sys
 import os
 from os import listdir
