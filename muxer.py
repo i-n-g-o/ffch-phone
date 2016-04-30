@@ -75,8 +75,11 @@ class Muxer(object):
     def isMuxing(self):
         return self.isMuxing
 
+    def setFPS(self, fps):
+        self.fps = fps
+
     def doMux(self, vfn, afn):
-        self.isMuxing = True
+
         v_file = vfn+".h264"
         a_file = afn+".wav"
         # check files
@@ -92,9 +95,12 @@ class Muxer(object):
 
         #
         audio_format = ".m4a"
+        # "-loglevel", "0",
         audio_convert_cmd = ["ffmpeg", "-y", "-i", a_file, "-strict", "experimental", "-acodec", "aac", "-b:a", "128k", vfn+audio_format]
-        mux_cmd = ["MP4Box", "-fps", "25", "-add", v_file, "-add", vfn+audio_format, vfn+".mp4"]
+        #"-quiet",
+        mux_cmd = ["MP4Box", "-fps", str(self.fps), "-add", v_file, "-add", vfn+audio_format, vfn+".mp4"]
         #
+        self.isMuxing = True
         self.executeCmd(audio_convert_cmd)
         self.muxPid = 0
         self.executeCmd(mux_cmd)
@@ -116,10 +122,15 @@ class Muxer(object):
         if os.path.isfile(vfn+audio_format):
             shutil.move(vfn+audio_format, self.backup_folder)
 
+        print "done muxing:", vfn+".mp4"
         self.isMuxing = False
         return True
 
     def start(self):
+
+        if self.isMuxing:
+            print "already muxing return"
+            return
 
         if not os.path.isdir(self.video_folder):
             return
@@ -181,31 +192,6 @@ class Muxer(object):
         self.muxPid = 0
         self.rec_lock = None
         self.isMuxing = False
+        self.fps = 25
 
         self.setFolders(v_folder, a_folder, o_folder, b_folder)
-
-
-
-# mx = Muxer()
-# mx.start()
-
-
-
-# ############################
-# # convert audio
-# print "convert audio"
-# audio_format = "m4a"
-# # subprocess.call(["sox", rec_filename+".wav", rec_filename+"."+audio_format])
-# #ffmpeg -i 2016_04_22-14_40_10-ffch.wav -strict experimental -acodec aac -b:a 128k output.m4a
-# subprocess.call(["ffmpeg", "-i", rec_filename+".wav", "-strict", "experimental", "-acodec", "aac", "-b:a", "128k", rec_filename+"."+audio_format])
-#
-# ############################
-# # mux audio and video
-# print "mux video and audio"
-# subprocess.call(["MP4Box", "-fps", "25", "-add", rec_filename + ".h264", "-add", rec_filename+"."+audio_format, out_filename+".mp4"])
-#
-# # print "removing: ", rec_filename+".h264"
-# # try:
-# #     os.remove(rec_filename + ".h264")
-# # except IOError,e:
-# #     print e
