@@ -36,11 +36,6 @@ import ConfigParser
 #sudo AUDIODEV=hw:0 rec -c 2 -r 48000 -C 320.99 --buffer 262144 noise3.mp3 gain -h bass -20 gain -l 18
 
 ##################
-# remount all sudo mount -a
-##################
-subprocess.call(["mount", "-a"], shell=False)
-
-##################
 # variables
 ##################
 recording_duration = 140 #seconds
@@ -49,6 +44,8 @@ rec_folder_a = "/home/pi/ffchdisk1/rec/"
 out_folder = "/home/pi/ffchdisk/out/"
 backup_folder = "/home/pi/ffchdisk/backup/"
 playback_file = "/home/pi/phone-audio.wav"
+video_rec_delay = 0
+audio_rec_delay = 0
 
 # camera
 camera_width = 1920
@@ -109,6 +106,22 @@ try:
 except ConfigParser.NoOptionError,e:
     pass
 
+try:
+    video_rec_delay = int(configParser.get('ffch-phone', 'video_rec_delay'))
+except ConfigParser.NoOptionError,e:
+    pass
+
+try:
+    audio_rec_delay = int(configParser.get('ffch-phone', 'audio_rec_delay'))
+except ConfigParser.NoOptionError,e:
+    pass
+
+if video_rec_delay < 0:
+    video_rec_delay = 0
+if audio_rec_delay < 0:
+    audio_rec_delay = 0
+
+
 # check folders
 if not rec_folder.endswith("/"):
     rec_folder = rec_folder + "/"
@@ -145,26 +158,23 @@ except Exception,e:
     pass
 
 
+video_offset = (1.0/camera_fps)*float(video_rec_delay)
+audio_offset = (1.0/camera_fps)*float(audio_rec_delay)
 
 ##################
 # print vars
 ##################
-print "record duration:", str(recording_duration)
+print "record duration:", str(recording_duration), "seconds"
 print "video folder:", rec_folder
 print "audio folder:", rec_folder_a
 print "out folder:", out_folder
 print "backup folder:", backup_folder
 print "playback file:", playback_file
+print "video recording delay:", str(video_rec_delay), " frames:", str(video_offset), "seconds"
+print "audio recording delay:", str(audio_rec_delay), " frames:", str(audio_offset), "seconds"
 
 print "camera settings:", str(camera_width)+"x"+str(camera_height), "@", str(camera_fps), "fps. [", str(camera_hflip), ",", str(camera_vflip), "]"
 
-############################
-# check for folder
-############################
-# function in muxer.py
-checkFolder(rec_folder)
-checkFolder(rec_folder_a)
-checkFolder(out_folder)
 
 ############################
 # prepare camera
@@ -174,7 +184,14 @@ camera.framerate = camera_fps
 camera.resolution = (camera_width, camera_heigth)
 camera.hflip = camera_hflip
 camera.vflip = camera_vflip
+# camera.exposure_mode = "fixedfps"
 
+
+def checkAllFolders():
+    subprocess.call(["mount", "-a"], shell=False)
+    checkFolder(rec_folder)
+    checkFolder(rec_folder_a)
+    checkFolder(out_folder)
 
 def wipeAllLocks(folder):
     if not folder.endswith("/"):
@@ -192,6 +209,14 @@ def checkForLock(folder):
         return True
     return False
 
+
+def doStartVideo(filename):
+    if video_offset > 0:
+        target_time = time.clock() + video_offset
+        while time.clock() < target_time:
+            pass
+    camera.start_recording(filename, format='h264', quality=20)
+
 def startRecord():
     global isRecording
     global rec_filename
@@ -207,10 +232,10 @@ def startRecord():
         stopRecord()
 
 
-    # remount all sudo mount -a
-    subprocess.call(["mount", "-a"], shell=False)
+    # remount all and check folder
+    checkAllFolders()
 
-    #
+    # playback file
     if os.path.isfile(playback_file):
         playbackProc = subprocess.Popen(["aplay", playback_file], shell=False)
 
@@ -240,17 +265,23 @@ def startRecord():
         # write lock files
         open(rec_filename+".lock", 'a').close()
 
-        ############################
-        # start video recording:
-        ############################
-        camera.start_recording(rec_filename + ".h264", format='h264', quality=15)
-
-        # start audio recording
-        audioProcess = subprocess.Popen(audiocmd, shell=False)
 
         # started recording
         isRecording = True
         record_started = time.time()
+
+        ############################
+        # start video recording:
+        ############################
+        # start video in own thread, so we can delay it if needed
+        thread.start_new_thread( doStartVideo, (rec_filename + ".h264",))
+
+        # delay audio recording if needed
+        if audio_offset > 0:
+            target_time = time.clock() + audio_offset
+            while time.clock() < target_time:
+                pass
+        audioProcess = subprocess.Popen(audiocmd, shell=False)
 
 
 def stopRecord():
@@ -270,7 +301,7 @@ def stopRecord():
             # while playbackProc.poll():
             #     continue
         except OSError,e:
-            pass
+            print "terminate playback error"
         playbackProc = None
 
     if not isRecording:
@@ -298,6 +329,7 @@ def stopRecord():
             except OSError,e:
                 print "error: no audioProcess!"
                 pass
+            audioProcess = None
         else:
             print "error: audio not recording"
 
@@ -357,12 +389,24 @@ def btnButtonPressed(channel):
 GPIO.add_event_detect(phonePinNum, GPIO.BOTH, callback=phoneButtonPressed, bouncetime=1000)
 GPIO.add_event_detect(buttonPinNum, GPIO.BOTH, callback=btnButtonPressed, bouncetime=1000)
 
+
+############################
+# check for folder
+############################
+# function in muxer.py
+checkAllFolders()
+
+############################
 # initally wipe the locks
+############################
 wipeAllLocks(rec_folder)
 
+############################
 # setup muxer
+############################
 mx = Muxer(rec_folder, rec_folder_a, out_folder, backup_folder)
 mx.setLock(rec_lock)
+mx.setFPS(camera_fps)
 
 print "ready to record..."
 
@@ -373,28 +417,21 @@ while True:
     try:
         sleep(0.5)
 
-        # if audioProcess is not None:
-        #     try:
-        #         while audioProcess.poll():
-        #             continue
-        #         print "audioProcess done - main loop"
-        #     except Exception,e:
-        #         pass
-
         now = time.time()
-        if record_started > 0 and (now - record_started) > recording_duration:
-            sleep(0.5)
-            stopRecord()
-
-        if record_started == 0 and not mx.isMuxing:
-            # start muxing
-            mx.start()
+        if record_started > 0:
+            if (now - record_started) > recording_duration:
+                sleep(0.5)
+                stopRecord()
+        else:
+            if not mx.isMuxing:
+                # start muxing
+                mx.start()
 
     except KeyboardInterrupt:
         break
     except Exception,e:
         # pass any other exceptions
-        print "another exception: ", e
+        print "exception in main loop: ", e
         pass
 
 # cleanup
