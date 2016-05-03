@@ -1,4 +1,4 @@
 #!/bin/bash
 
 sudo apt-get update
-sudo apt-get install -y gpac ffmpeg
+sudo apt-get install gstreamer1.0-tools
