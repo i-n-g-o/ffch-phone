@@ -95,21 +95,29 @@ class Muxer(object):
 
         #
         audio_format = ".m4a"
+        video_format = ".avi"
         # "-loglevel", "0",
         audio_convert_cmd = ["ffmpeg", "-y", "-i", a_file, "-strict", "experimental", "-acodec", "aac", "-b:a", "128k", vfn+audio_format]
         #"-quiet",
-        mux_cmd = ["MP4Box", "-fps", str(self.fps), "-add", v_file, "-add", vfn+audio_format, vfn+".mp4"]
+        # mux_cmd = ["MP4Box", "-fps", str(self.fps), "-add", v_file, "-add", vfn+audio_format, vfn+".mp4"]
+
+        #fast muxing - no audio converting
+        #gst-launch-1.0 -v filesrc location=/home/pi/ffchdisk/rec/2016_05_02-05_41_51-ffch.h264 ! video/x-h264,width=1920,height=1080,framerate=25/1 ! h264parse ! queue ! mux. filesrc location=/home/pi/ffchdisk1/rec/2016_05_02-05_41_51-ffch.wav ! decodebin ! audioconvert ! queue ! mux. avimux name=mux ! filesink location=test.avi
+
+        # mux_cmd = ["gst-launch-1.0", "-v", "filesrc location="+v_file, "!", "video/x-h264,width=1920,height=1080,framerate=25/1", "!", "h264parse", "!", "queue", "!", "mux. filesrc location="+a_file, "!", "decodebin", "!", "audioconvert", "!", "queue", "!", "mux. avimux name=mux", "!", "filesink", "location="+vfn+".avi"]
+        mux_cmd = ["/home/pi/mux.sh", v_file, a_file, vfn+video_format]
+
         #
         self.isMuxing = True
-        self.executeCmd(audio_convert_cmd)
-        self.muxPid = 0
+        # self.executeCmd(audio_convert_cmd)
+        # self.muxPid = 0
         self.executeCmd(mux_cmd)
         self.muxPid = 0
 
         # move files around
-        if os.path.isfile(vfn+".mp4"):
-            print "Muxer: moving file", vfn+".mp4 to:", self.out_folder
-            shutil.move(vfn+".mp4", self.out_folder)
+        if os.path.isfile(vfn+video_format):
+            print "Muxer: moving file", vfn+video_format, "to:", self.out_folder
+            shutil.move(vfn+video_format, self.out_folder)
         else:
             print "error: file does not exist"
 
@@ -122,7 +130,7 @@ class Muxer(object):
         if os.path.isfile(vfn+audio_format):
             shutil.move(vfn+audio_format, self.backup_folder)
 
-        print "done muxing:", vfn+".mp4"
+        print "done muxing:", vfn
         self.isMuxing = False
         return True
 
@@ -165,13 +173,12 @@ class Muxer(object):
         filenames = myhash.keys()
         for f in filenames:
             if (f+".lock" in files):
-                pass
-            if (f+".lock" in files):
-                pass
-            else:
+                continue
+            if (f+".h264" in files):
                 print "processing: ", f
                 if not self.doMux(self.video_folder + f, self.audio_folder + f):
                     print "failed muxing: " + f
+
 
     def setFolders(self, v_folder, a_folder, o_folder, b_folder):
         self.video_folder = v_folder
