@@ -16,7 +16,6 @@
 # General Public License for more details.
 #-------------------------------------------------------------------------------
 
-
 import sys
 import subprocess
 import signal
@@ -31,6 +30,7 @@ import RPi.GPIO as GPIO #for GPIO
 from muxer import Muxer
 from muxer import checkFolder
 import ConfigParser
+import logging
 
 
 #sudo AUDIODEV=hw:0 rec -c 2 -r 48000 -C 320.99 --buffer 262144 noise3.mp3 gain -h bass -20 gain -l 18
@@ -44,8 +44,11 @@ rec_folder_a = "/home/pi/ffchdisk1/rec/"
 out_folder = "/home/pi/ffchdisk/out/"
 backup_folder = "/home/pi/ffchdisk/backup/"
 playback_file = "/home/pi/phone-audio.wav"
+log_file = "/home/pi/log"
 video_rec_delay = 0
 audio_rec_delay = 0
+
+# auflegen_wav = "/home/pi/auflegen.wav"
 
 # camera
 camera_width = 1920
@@ -107,6 +110,11 @@ except ConfigParser.NoOptionError,e:
     pass
 
 try:
+    log_file = configParser.get('ffch-phone', 'log')
+except ConfigParser.NoOptionError,e:
+    pass
+
+try:
     video_rec_delay = int(configParser.get('ffch-phone', 'video_rec_delay'))
 except ConfigParser.NoOptionError,e:
     pass
@@ -161,20 +169,6 @@ except Exception,e:
 video_offset = (1.0/camera_fps)*float(video_rec_delay)
 audio_offset = (1.0/camera_fps)*float(audio_rec_delay)
 
-##################
-# print vars
-##################
-print "record duration:", str(recording_duration), "seconds"
-print "video folder:", rec_folder
-print "audio folder:", rec_folder_a
-print "out folder:", out_folder
-print "backup folder:", backup_folder
-print "playback file:", playback_file
-print "video recording delay:", str(video_rec_delay), " frames:", str(video_offset), "seconds"
-print "audio recording delay:", str(audio_rec_delay), " frames:", str(audio_offset), "seconds"
-
-print "camera settings:", str(camera_width)+"x"+str(camera_height), "@", str(camera_fps), "fps. [", str(camera_hflip), ",", str(camera_vflip), "]"
-
 
 ############################
 # prepare camera
@@ -203,7 +197,6 @@ def wipeAllLocks(folder):
         except IOError,e:
             print e
 
-
 def checkForLock(folder):
     if len([x for x in listdir(folder) if ("lock" in x)]) > 0:
         return True
@@ -216,6 +209,7 @@ def doStartVideo(filename):
         while time.clock() < target_time:
             pass
     camera.start_recording(filename, format='h264', quality=20)
+
 
 def startRecord():
     global isRecording
@@ -260,6 +254,9 @@ def startRecord():
 
         #"-d", str(recording_duration),
         # arecord -c 1 -f dat -t wav file.wav
+        #-R, --start-delay=#     delay for automatic PCM start is # microseconds
+        # (relative to buffer size if <= 0)
+
         audiocmd = ["arecord", "-c", "1", "-f", "dat", "-t", "wav", rec_filename_a+".wav"]
 
         # write lock files
@@ -284,15 +281,7 @@ def startRecord():
         audioProcess = subprocess.Popen(audiocmd, shell=False)
 
 
-def stopRecord():
-    global isRecording
-    global camera
-    global audioProcess
-    global rec_filename
-    global out_filename
-    global muxer_pid
-    global record_started
-    global rec_lock
+def stopPlayback():
     global playbackProc
 
     if playbackProc is not None:
@@ -304,10 +293,24 @@ def stopRecord():
             print "terminate playback error"
         playbackProc = None
 
-    if not isRecording:
-        return
+
+def stopRecord():
+    global isRecording
+    global camera
+    global audioProcess
+    global rec_filename
+    global out_filename
+    global muxer_pid
+    global record_started
+    global rec_lock
+    global playbackProc
+
+    stopPlayback()
 
     with rec_lock:
+
+        if not isRecording:
+            return
 
         now = time.time()
         if record_started > 0 and (now - record_started) < 2:
@@ -316,6 +319,7 @@ def stopRecord():
 
         # camera.wait_recording(recording_duration)
         print "stop video recording"
+
         if camera.recording:
             camera.stop_recording()
         else:
@@ -366,8 +370,10 @@ GPIO.setup(buttonPinNum, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 def phoneButtonPressed(channel):
     if (GPIO.input(phonePinNum) == 0):
+        print "GPIO stop recording"
         stopRecord()
     else:
+        print "GPIO start recording"
         startRecord()
 
 
@@ -397,6 +403,35 @@ GPIO.add_event_detect(buttonPinNum, GPIO.BOTH, callback=btnButtonPressed, bounce
 checkAllFolders()
 
 ############################
+# setup logging
+############################
+logging.basicConfig(filename=log_file,
+                    filemode='a',
+                    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                    datefmt='%H:%M:%S',
+                    level=logging.DEBUG)
+
+my_logger = logging.getLogger('ffch-phone')
+my_logger.info('ffch-phone starting up')
+
+##################
+# print vars
+##################
+my_logger.info("----- ffch phone start -----")
+my_logger.info("record duration: " + str(recording_duration) + " seconds")
+my_logger.info("video folder: " + rec_folder)
+my_logger.info("audio folder: " + rec_folder_a)
+my_logger.info("out folder: " + out_folder)
+my_logger.info("backup folder: " + backup_folder)
+my_logger.info("playback file: " + playback_file)
+my_logger.info("video recording delay: " + str(video_rec_delay) + " frames: " + str(video_offset) + " seconds")
+my_logger.info("audio recording delay: " + str(audio_rec_delay) + " frames: " + str(audio_offset) + " seconds")
+
+my_logger.info("camera settings: " + str(camera_width)+"x"+str(camera_height) + " @ " + str(camera_fps) + "fps. [" + str(camera_hflip) + "," + str(camera_vflip) + "]")
+
+
+
+############################
 # initally wipe the locks
 ############################
 wipeAllLocks(rec_folder)
@@ -408,7 +443,7 @@ mx = Muxer(rec_folder, rec_folder_a, out_folder, backup_folder)
 mx.setLock(rec_lock)
 mx.setFPS(camera_fps)
 
-print "ready to record..."
+# print "ready to record..."
 
 ############################
 # main loop
@@ -420,12 +455,16 @@ while True:
         now = time.time()
         if record_started > 0:
             if (now - record_started) > recording_duration:
+                stopPlayback()
+                # play auflegen_wav
+                # subprocess.call(["aplay", auflegen_wav], shell=False);
                 sleep(0.5)
                 stopRecord()
         else:
             if not mx.isMuxing:
                 # start muxing
                 mx.start()
+
 
     except KeyboardInterrupt:
         break
